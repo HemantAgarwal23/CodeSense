@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #0f172a;
+  color: #e5e7eb;
+  font-family: "Segoe UI", "SF Pro Text", system-ui, sans-serif;
+  line-height: 1.5;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+input,
+textarea,
+button {
+  font: inherit;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+input,
+textarea,
+button {
+  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+textarea,
+code,
+pre {
+  font-family: "Fira Code", "Cascadia Code", Consolas, "Courier New", monospace;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid #0f172a;
+  border-radius: 9999px;
+  background: #2b3648;
+}
+
+*::-webkit-scrollbar-track {
+  background: #0f172a;
+}
