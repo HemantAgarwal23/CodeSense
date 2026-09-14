@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: codesense-ai-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      # Set to the frontend URL once it is deployed, e.g. https://codesense-ai-web.onrender.com
+      - key: CORS_ORIGINS
+        sync: false
+      - key: MAX_REPO_FILES
+        value: "20"
+
+  - type: web
+    name: codesense-ai-web
+    runtime: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: ./frontend/dist
+    envVars:
+      # Set to the API URL once it is deployed, e.g. https://codesense-ai-api.onrender.com
+      - key: VITE_API_BASE_URL
+        sync: false
