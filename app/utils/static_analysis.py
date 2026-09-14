@@ -1,4 +1,4 @@
-"""AST-driven static analyzer for Code Review Copilot.
+"""AST-driven static analyzer for CodeSense AI.
 
 Primary API:
     analyze_code(code: str) -> dict
@@ -18,6 +18,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 MAX_FILE_SIZE_BYTES = 1 * 1024 * 1024
+SHADOWABLE_BUILTINS = {"list", "dict", "set", "str", "int", "tuple", "input", "type", "id"}
 
 
 @dataclass(frozen=True)
@@ -222,10 +223,380 @@ def detect_runtime_issues(tree: ast.AST | None) -> list[AnalyzerIssue]:
     return _dedupe_issues(issues)
 
 
+def _lambda_captures_name(lambda_node: ast.Lambda, name: str) -> bool:
+    """Return True if lambda body references `name` without binding it as a lambda param/default."""
+    param_names = {arg.arg for arg in lambda_node.args.args}
+    param_names.update(arg.arg for arg in lambda_node.args.kwonlyargs)
+    if lambda_node.args.vararg:
+        param_names.add(lambda_node.args.vararg.arg)
+    if lambda_node.args.kwarg:
+        param_names.add(lambda_node.args.kwarg.arg)
+    if name in param_names:
+        return False
+
+    # Safe pattern: lambda i=i: ...
+    for default in list(lambda_node.args.defaults) + [d for d in lambda_node.args.kw_defaults if d is not None]:
+        if isinstance(default, ast.Name) and default.id == name:
+            return False
+
+    return any(isinstance(node, ast.Name) and node.id == name for node in ast.walk(lambda_node.body))
+
+
+def detect_runtime_semantic_issues(tree: ast.AST | None) -> list[AnalyzerIssue]:
+    """Detect runtime semantic pitfalls via AST patterns with conservative guards."""
+    if tree is None:
+        return []
+
+    issues: list[AnalyzerIssue] = []
+
+    # 1) Potential infinite direct recursion with no visible base condition.
+    for fn in [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+        has_control_flow_guard = any(isinstance(n, (ast.If, ast.Try, ast.While, ast.For, ast.Match)) for n in fn.body)
+        self_calls = [
+            n for n in ast.walk(fn)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == fn.name
+        ]
+        if not self_calls or has_control_flow_guard:
+            continue
+
+        # Conservative: only flag when all returns directly recurse.
+        returns = [n for n in ast.walk(fn) if isinstance(n, ast.Return)]
+        if not returns:
+            continue
+        all_returns_recursive = True
+        for ret in returns:
+            value = ret.value
+            if not (
+                isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Name)
+                and value.func.id == fn.name
+            ):
+                all_returns_recursive = False
+                break
+        if all_returns_recursive:
+            issues.append(
+                AnalyzerIssue(
+                    category="runtime",
+                    severity="error",
+                    message="Potential infinite recursion may cause RecursionError.",
+                    line=int(getattr(fn, "lineno", 0) or 0),
+                    symbol="infinite-recursion-risk",
+                )
+            )
+
+    # 2) Late-binding lambda capture inside loops.
+    for loop in [n for n in ast.walk(tree) if isinstance(n, ast.For)]:
+        if not isinstance(loop.target, ast.Name):
+            continue
+        loop_var = loop.target.id
+
+        for node in ast.walk(loop):
+            if not isinstance(node, ast.Lambda):
+                continue
+            if not _lambda_captures_name(node, loop_var):
+                continue
+
+            # Reduce false positives: focus on lambdas stored for later use.
+            parent_like_store = False
+            for use_node in ast.walk(loop):
+                if isinstance(use_node, ast.Call) and isinstance(use_node.func, ast.Attribute):
+                    if use_node.func.attr in {"append", "extend", "add"} and node in use_node.args:
+                        parent_like_store = True
+                        break
+                if isinstance(use_node, ast.Assign):
+                    if use_node.value is node:
+                        parent_like_store = True
+                        break
+
+            if not parent_like_store:
+                continue
+
+            issues.append(
+                AnalyzerIssue(
+                    category="runtime",
+                    severity="warning",
+                    message="Lambda captures loop variable; closures may reference final value.",
+                    line=int(getattr(node, "lineno", 0) or 0),
+                    symbol="late-binding-lambda",
+                )
+            )
+
+    return _dedupe_issues(issues)
+
+
+def detect_exception_handling_smells(tree: ast.AST | None) -> list[AnalyzerIssue]:
+    """Detect broad exception handling patterns that can hide runtime failures."""
+    if tree is None:
+        return []
+
+    issues: list[AnalyzerIssue] = []
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Try):
+            continue
+        for handler in node.handlers:
+            # bare except:
+            if handler.type is None:
+                issues.append(
+                    AnalyzerIssue(
+                        category="runtime",
+                        severity="warning",
+                        message="Broad exception handling may hide runtime failures.",
+                        line=int(getattr(handler, "lineno", 0) or 0),
+                        symbol="broad-except",
+                    )
+                )
+                continue
+
+            # except Exception: pass
+            is_exception_handler = isinstance(handler.type, ast.Name) and handler.type.id == "Exception"
+            handler_body_is_pass = bool(handler.body) and all(isinstance(stmt, ast.Pass) for stmt in handler.body)
+            if is_exception_handler and handler_body_is_pass:
+                issues.append(
+                    AnalyzerIssue(
+                        category="runtime",
+                        severity="warning",
+                        message="Broad exception handling may hide runtime failures.",
+                        line=int(getattr(handler, "lineno", 0) or 0),
+                        symbol="exception-pass-swallow",
+                    )
+                )
+
+    return _dedupe_issues(issues)
+
+
+def _is_sql_execute_call(node: ast.Call) -> bool:
+    return isinstance(node.func, ast.Attribute) and node.func.attr in {"execute", "executemany"}
+
+
+def _is_tainted_sql_arg(arg: ast.AST) -> bool:
+    # f"...{user_input}..."
+    if isinstance(arg, ast.JoinedStr):
+        return True
+    # "... " + user_input
+    if isinstance(arg, ast.BinOp) and isinstance(arg.op, ast.Add):
+        return True
+    # "SELECT ... %s" % user_input
+    if isinstance(arg, ast.BinOp) and isinstance(arg.op, ast.Mod):
+        return True
+    return False
+
+
+def detect_security_issues(tree: ast.AST | None) -> list[AnalyzerIssue]:
+    """Detect obvious high-signal security vulnerabilities."""
+    if tree is None:
+        return []
+
+    issues: list[AnalyzerIssue] = []
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and _is_sql_execute_call(node) and node.args:
+            if _is_tainted_sql_arg(node.args[0]):
+                issues.append(
+                    AnalyzerIssue(
+                        category="security",
+                        severity="error",
+                        message="Potential SQL injection: dynamic SQL passed to execute().",
+                        line=int(getattr(node, "lineno", 0) or 0),
+                        symbol="sql-injection-risk",
+                    )
+                )
+
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"eval", "exec"}:
+            issues.append(
+                AnalyzerIssue(
+                    category="security",
+                    severity="error",
+                    message=f"Unsafe use of {node.func.id}() may execute untrusted code.",
+                    line=int(getattr(node, "lineno", 0) or 0),
+                    symbol="unsafe-dynamic-exec",
+                )
+            )
+
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr in {"run", "Popen", "call"} and node.args:
+                for kw in node.keywords or []:
+                    if kw.arg == "shell" and isinstance(kw.value, ast.Constant) and kw.value.value is True:
+                        issues.append(
+                            AnalyzerIssue(
+                                category="security",
+                                severity="error",
+                                message="Unsafe subprocess usage: shell=True detected.",
+                                line=int(getattr(node, "lineno", 0) or 0),
+                                symbol="unsafe-subprocess-shell-true",
+                            )
+                        )
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            value = node.value.value
+            if len(value) < 8:
+                continue
+            lowered_value = value.lower()
+            for target in node.targets:
+                if not isinstance(target, ast.Name):
+                    continue
+                name = target.id.lower()
+                if any(token in name for token in ("password", "passwd", "secret", "api_key", "token", "key")):
+                    if any(token in lowered_value for token in ("changeme", "example", "test", "dummy")):
+                        continue
+                    issues.append(
+                        AnalyzerIssue(
+                            category="security",
+                            severity="error",
+                            message=f"Possible hardcoded secret in variable '{target.id}'.",
+                            line=int(getattr(node, "lineno", 0) or 0),
+                            symbol="hardcoded-secret",
+                        )
+                    )
+                    break
+
+    return _dedupe_issues(issues)
+
+
+def detect_resource_leaks(tree: ast.AST | None) -> list[AnalyzerIssue]:
+    """Detect obvious resource handling leaks."""
+    if tree is None:
+        return []
+
+    issues: list[AnalyzerIssue] = []
+    for fn in [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+        assigned_conn_names: set[str] = set()
+        closed_conn_names: set[str] = set()
+
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+                if isinstance(node.value.func, ast.Attribute) and node.value.func.attr in {"connect", "cursor"}:
+                    for target in node.targets:
+                        if isinstance(target, ast.Name):
+                            assigned_conn_names.add(target.id)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                if node.func.attr == "close" and isinstance(node.func.value, ast.Name):
+                    closed_conn_names.add(node.func.value.id)
+
+        for conn_name in sorted(assigned_conn_names - closed_conn_names):
+            issues.append(
+                AnalyzerIssue(
+                    category="runtime",
+                    severity="warning",
+                    message=f"Resource '{conn_name}' appears opened but never closed.",
+                    line=int(getattr(fn, "lineno", 0) or 0),
+                    symbol="resource-leak-risk",
+                )
+            )
+
+    return _dedupe_issues(issues)
+
+
+def detect_semantic_issues(tree: ast.AST | None) -> list[AnalyzerIssue]:
+    """Detect semantic Python bugs that often pass syntax checks."""
+    if tree is None:
+        return []
+
+    issues: list[AnalyzerIssue] = []
+
+    for fn in [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+        all_defaults = list(fn.args.defaults) + [d for d in fn.args.kw_defaults if d is not None]
+        for default in all_defaults:
+            is_mutable_literal = isinstance(default, (ast.List, ast.Dict, ast.Set))
+            is_mutable_ctor = (
+                isinstance(default, ast.Call)
+                and isinstance(default.func, ast.Name)
+                and default.func.id in {"list", "dict", "set"}
+                and not default.args
+                and not default.keywords
+            )
+            if is_mutable_literal or is_mutable_ctor:
+                issues.append(
+                    AnalyzerIssue(
+                        category="semantic",
+                        severity="error",
+                        message="Mutable default argument may cause shared state across calls.",
+                        line=int(getattr(default, "lineno", getattr(fn, "lineno", 0)) or 0),
+                        symbol="mutable-default-argument",
+                    )
+                )
+                break
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+        else:
+            continue
+
+        for target in targets:
+            if isinstance(target, ast.Name) and target.id in SHADOWABLE_BUILTINS:
+                issues.append(
+                    AnalyzerIssue(
+                        category="semantic",
+                        severity="warning",
+                        message=f"Builtin '{target.id}' is shadowed by variable assignment.",
+                        line=int(getattr(target, "lineno", 0) or 0),
+                        symbol="builtin-shadowing",
+                    )
+                )
+
+    return _dedupe_issues(issues)
+
+
 def detect_logical_issues(tree: ast.AST | None) -> list[AnalyzerIssue]:
     """Detect logical return-flow problems via AST structure."""
     if tree is None:
         return []
+
+    def _returns_on_all_paths(statements: list[ast.stmt]) -> bool:
+        """Conservative control-flow check for guaranteed return/raise."""
+        for stmt in statements:
+            # Direct terminators
+            if isinstance(stmt, (ast.Return, ast.Raise)):
+                return True
+
+            # if/else must both terminate
+            if isinstance(stmt, ast.If):
+                then_returns = _returns_on_all_paths(stmt.body)
+                else_returns = _returns_on_all_paths(stmt.orelse) if stmt.orelse else False
+                if then_returns and else_returns:
+                    return True
+                continue
+
+            # try: if finally terminates, function terminates.
+            # Otherwise, require try + all except blocks to terminate.
+            if isinstance(stmt, ast.Try):
+                if _returns_on_all_paths(stmt.finalbody):
+                    return True
+                try_returns = _returns_on_all_paths(stmt.body)
+                handlers_return = bool(stmt.handlers) and all(
+                    _returns_on_all_paths(handler.body) for handler in stmt.handlers
+                )
+                if try_returns and handlers_return:
+                    return True
+                continue
+
+        return False
+
+    def _collect_unreachable_line_numbers(statements: list[ast.stmt]) -> list[int]:
+        unreachable: list[int] = []
+        terminated = False
+        for stmt in statements:
+            if terminated:
+                unreachable.append(int(getattr(stmt, "lineno", 0) or 0))
+                continue
+            if isinstance(stmt, (ast.Return, ast.Raise)):
+                terminated = True
+            elif isinstance(stmt, ast.If):
+                unreachable.extend(_collect_unreachable_line_numbers(stmt.body))
+                unreachable.extend(_collect_unreachable_line_numbers(stmt.orelse))
+            elif isinstance(stmt, ast.Try):
+                unreachable.extend(_collect_unreachable_line_numbers(stmt.body))
+                unreachable.extend(_collect_unreachable_line_numbers(stmt.orelse))
+                for handler in stmt.handlers:
+                    unreachable.extend(_collect_unreachable_line_numbers(handler.body))
+                unreachable.extend(_collect_unreachable_line_numbers(stmt.finalbody))
+        return unreachable
 
     issues: list[AnalyzerIssue] = []
     for fn in [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
@@ -256,7 +627,7 @@ def detect_logical_issues(tree: ast.AST | None) -> list[AnalyzerIssue]:
                     symbol="inconsistent-return",
                 )
             )
-        elif has_valued_return and fn.body and not isinstance(fn.body[-1], ast.Return):
+        elif has_valued_return and not _returns_on_all_paths(fn.body):
             issues.append(
                 AnalyzerIssue(
                     category="logic",
@@ -264,6 +635,18 @@ def detect_logical_issues(tree: ast.AST | None) -> list[AnalyzerIssue]:
                     message=f"Function '{fn.name}' may exit without returning a value on some paths.",
                     line=int(getattr(fn, "lineno", 0) or 0),
                     symbol="inconsistent-return-path",
+                )
+            )
+
+        unreachable_lines = [line for line in _collect_unreachable_line_numbers(fn.body) if line > 0]
+        if unreachable_lines:
+            issues.append(
+                AnalyzerIssue(
+                    category="logic",
+                    severity="warning",
+                    message=f"Function '{fn.name}' contains unreachable code after return/raise.",
+                    line=unreachable_lines[0],
+                    symbol="unreachable-code",
                 )
             )
 
@@ -347,10 +730,12 @@ def generate_fixes(
     syntax_errors: list[AnalyzerIssue],
     runtime_risks: list[AnalyzerIssue],
     logical_issues: list[AnalyzerIssue],
+    security_issues: list[AnalyzerIssue],
+    semantic_issues: list[AnalyzerIssue],
 ) -> list[dict[str, Any]]:
     """Generate targeted fixes only for actual syntax/runtime/logical issues."""
     fixes: list[dict[str, Any]] = []
-    for issue in [*syntax_errors, *runtime_risks, *logical_issues]:
+    for issue in [*syntax_errors, *runtime_risks, *logical_issues, *security_issues, *semantic_issues]:
         if issue.symbol == "syntax-error":
             fixes.append(
                 {
@@ -405,6 +790,96 @@ def generate_fixes(
                     "snippet": "if condition:\n    return value\nreturn default_value",
                 }
             )
+        elif issue.symbol == "sql-injection-risk":
+            fixes.append(
+                {
+                    "line": issue.line,
+                    "issue": issue.message,
+                    "fix": "Use parameterized query instead of string interpolation.",
+                    "snippet": "cursor.execute('SELECT * FROM users WHERE id = %s', (user_id,))",
+                }
+            )
+        elif issue.symbol == "unsafe-dynamic-exec":
+            fixes.append(
+                {
+                    "line": issue.line,
+                    "issue": issue.message,
+                    "fix": "Remove eval/exec on untrusted input and use safe parsing/dispatch.",
+                    "snippet": "# Replace eval/exec with explicit mapping or parser.",
+                }
+            )
+        elif issue.symbol == "unsafe-subprocess-shell-true":
+            fixes.append(
+                {
+                    "line": issue.line,
+                    "issue": issue.message,
+                    "fix": "Use subprocess with argument list and shell=False.",
+                    "snippet": "subprocess.run(['cmd', 'arg1'], shell=False, check=True)",
+                }
+            )
+        elif issue.symbol == "hardcoded-secret":
+            fixes.append(
+                {
+                    "line": issue.line,
+                    "issue": issue.message,
+                    "fix": "Move secret to environment variable or secret manager.",
+                    "snippet": "api_key = os.getenv('API_KEY')",
+                }
+            )
+        elif issue.symbol == "resource-leak-risk":
+            fixes.append(
+                {
+                    "line": issue.line,
+                    "issue": issue.message,
+                    "fix": "Close resources explicitly or use context manager.",
+                    "snippet": "with sqlite3.connect(db_path) as conn:\n    ...",
+                }
+            )
+        elif issue.symbol == "mutable-default-argument":
+            fixes.append(
+                {
+                    "line": issue.line,
+                    "issue": issue.message,
+                    "fix": "Use None as default and initialize inside function.",
+                    "snippet": "def fn(x, items=None):\n    if items is None:\n        items = []",
+                }
+            )
+        elif issue.symbol == "builtin-shadowing":
+            fixes.append(
+                {
+                    "line": issue.line,
+                    "issue": issue.message,
+                    "fix": "Rename variable to avoid shadowing Python builtins.",
+                    "snippet": "items_list = [1, 2, 3]",
+                }
+            )
+        elif issue.symbol == "infinite-recursion-risk":
+            fixes.append(
+                {
+                    "line": issue.line,
+                    "issue": issue.message,
+                    "fix": "Add a base condition that stops recursion.",
+                    "snippet": "def recurse(n):\n    if n <= 0:\n        return 0\n    return recurse(n - 1)",
+                }
+            )
+        elif issue.symbol == "late-binding-lambda":
+            fixes.append(
+                {
+                    "line": issue.line,
+                    "issue": issue.message,
+                    "fix": "Bind loop variable in lambda default argument.",
+                    "snippet": "funcs.append(lambda i=i: i)",
+                }
+            )
+        elif issue.symbol in {"broad-except", "exception-pass-swallow"}:
+            fixes.append(
+                {
+                    "line": issue.line,
+                    "issue": issue.message,
+                    "fix": "Catch specific exceptions and handle or re-raise them explicitly.",
+                    "snippet": "try:\n    ...\nexcept ZeroDivisionError as exc:\n    raise ValueError('Invalid divisor') from exc",
+                }
+            )
 
     seen: set[tuple[int, str]] = set()
     unique: list[dict[str, Any]] = []
@@ -435,10 +910,12 @@ def calculate_score(
     syntax_errors: list[AnalyzerIssue],
     logical_issues: list[AnalyzerIssue],
     runtime_risks: list[AnalyzerIssue],
+    security_issues: list[AnalyzerIssue],
+    semantic_issues: list[AnalyzerIssue],
     best_practice_issues: list[AnalyzerIssue],
 ) -> float:
     """Strict, deterministic score bands with production-ready gate for 10."""
-    bugs_count = len(syntax_errors) + len(logical_issues)
+    bugs_count = len(syntax_errors) + len(logical_issues) + len(security_issues) + len(semantic_issues)
     runtime_count = len(runtime_risks)
 
     symbols = {issue.symbol for issue in best_practice_issues}
@@ -475,18 +952,31 @@ def analyze_code(code: str) -> dict[str, Any]:
     """Analyze code and return strict structured output."""
     syntax_errors, tree = detect_syntax_errors(code)
     runtime_risks = detect_runtime_issues(tree)
+    runtime_semantic = detect_runtime_semantic_issues(tree)
+    exception_smells = detect_exception_handling_smells(tree)
+    security_issues = detect_security_issues(tree)
+    resource_leaks = detect_resource_leaks(tree)
+    runtime_risks = _dedupe_issues([*runtime_risks, *resource_leaks, *runtime_semantic, *exception_smells])
     logical_issues = detect_logical_issues(tree)
+    semantic_issues = detect_semantic_issues(tree)
     best_practice_issues = detect_best_practices(tree)
 
-    bugs = [issue.as_dict() for issue in [*syntax_errors, *logical_issues]]
+    bugs = [issue.as_dict() for issue in [*syntax_errors, *logical_issues, *security_issues, *semantic_issues]]
     runtime_payload = [issue.as_dict() for issue in runtime_risks]
-    fixes = generate_fixes(syntax_errors, runtime_risks, logical_issues)
+    fixes = generate_fixes(syntax_errors, runtime_risks, logical_issues, security_issues, semantic_issues)
     suggestions = generate_suggestions(best_practice_issues)
     if any(issue.symbol == "returns-none-instead-of-raise" for issue in runtime_risks):
         explicit = "Raise ValueError for invalid input instead of returning None."
         if explicit not in suggestions:
             suggestions.append(explicit)
-    score = calculate_score(syntax_errors, logical_issues, runtime_risks, best_practice_issues)
+    score = calculate_score(
+        syntax_errors,
+        logical_issues,
+        runtime_risks,
+        security_issues,
+        semantic_issues,
+        best_practice_issues,
+    )
 
     return {
         "score": score,

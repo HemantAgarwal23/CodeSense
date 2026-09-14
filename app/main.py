@@ -22,12 +22,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# The frontend calls the API without cookies, so credentials stay disabled.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=settings.cors_origin_list,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
 
 app.include_router(api_router, prefix=settings.api_prefix)

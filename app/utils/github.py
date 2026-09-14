@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -18,7 +19,7 @@ from git.exc import GitCommandError
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_EXTENSIONS = {".py", ".js", ".cpp"}
+ALLOWED_EXTENSIONS = {".py", ".js", ".ts", ".tsx", ".cpp", ".java"}
 MAX_FILE_SIZE_BYTES = 1 * 1024 * 1024  # 1 MB
 DEFAULT_CLONE_TIMEOUT_SECONDS = 60
 
@@ -77,10 +78,11 @@ def _clone_repository(
     timeout_seconds: int,
 ) -> None:
     """Clone repository into destination with timeout and no interactive prompts."""
-    env = {
+    env = os.environ.copy()
+    env.update({
         "GIT_TERMINAL_PROMPT": "0",
         "GCM_INTERACTIVE": "Never",
-    }
+    })
 
     try:
         Repo.clone_from(
@@ -88,12 +90,15 @@ def _clone_repository(
             destination.as_posix(),
             depth=1,
             branch=branch,
+            single_branch=True,
             env=env,
             kill_after_timeout=timeout_seconds,
         )
     except GitCommandError as exc:
-        stderr = (exc.stderr or "").lower()
-        message = str(exc).lower()
+        raw_stderr = (exc.stderr or "").strip()
+        raw_message = str(exc).strip()
+        stderr = raw_stderr.lower()
+        message = raw_message.lower()
         if (
             "repository not found" in stderr
             or "authentication failed" in stderr
@@ -105,7 +110,59 @@ def _clone_repository(
             ) from exc
         if "timed out" in stderr or "timed out" in message:
             raise RepositoryCloneError("Repository clone timed out.") from exc
-        raise RepositoryCloneError("Repository clone failed.") from exc
+
+        # Fallback: branch may not exist or GitPython clone path may fail unexpectedly.
+        try:
+            logger.warning(
+                "Primary clone failed (branch=%s). Retrying without explicit branch. error=%s",
+                branch,
+                raw_stderr or raw_message,
+            )
+            Repo.clone_from(
+                clone_url,
+                destination.as_posix(),
+                depth=1,
+                env=env,
+                kill_after_timeout=timeout_seconds,
+            )
+            return
+        except GitCommandError:
+            pass
+
+        # Final fallback: invoke git CLI directly for clearer compatibility.
+        try:
+            cmd = [
+                "git",
+                "clone",
+                "--depth",
+                "1",
+                "--branch",
+                branch,
+                clone_url,
+                destination.as_posix(),
+            ]
+            completed = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+                env=env,
+                check=False,
+            )
+            if completed.returncode == 0:
+                return
+            raw_stderr = (completed.stderr or "").strip()
+            raw_message = (completed.stdout or "").strip()
+            stderr = raw_stderr.lower()
+            message = raw_message.lower()
+        except subprocess.TimeoutExpired as timeout_exc:
+            raise RepositoryCloneError("Repository clone timed out.") from timeout_exc
+
+        concise = raw_stderr or raw_message or "Unknown git error"
+        concise = concise.replace("\r", " ").replace("\n", " ").strip()
+        if len(concise) > 300:
+            concise = concise[:300] + "..."
+        raise RepositoryCloneError(f"Repository clone failed: {concise}") from exc
     except Exception as exc:  # Defensive catch for process stability.
         raise RepositoryCloneError("Unexpected error during repository clone.") from exc
 

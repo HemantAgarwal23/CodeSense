@@ -1,4 +1,4 @@
-"""LangChain LLM client for Code Review Copilot using Groq Mixtral."""
+"""LangChain LLM client for CodeSense AI, backed by Groq-hosted Llama models."""
 
 from __future__ import annotations
 
@@ -22,8 +22,8 @@ def _escape_for_prompt(text: str) -> str:
       return text.replace("{", "{{").replace("}", "}}")
 
 DEFAULT_GROQ_MODELS = [
-    "llama-3.3-8b-instant",
-    "llama-3.3-70b-versatile",
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
 ]
 
 
@@ -80,7 +80,9 @@ class _CodePatterns(BaseModel):
 def _schema_example() -> str:
     return (
         '{\n'
-        '  "bugs": [],\n'
+        '  "bugs": [\n'
+        '    {"description": "", "line": 0, "severity": "medium", "confidence": "medium"}\n'
+        '  ],\n'
         '  "fixes": [],\n'
         '  "suggestions": [],\n'
         '  "complexity": "",\n'
@@ -173,6 +175,13 @@ def _detect_language(source_code: str) -> str:
     return "Unknown"
 
 
+def _number_lines(source_code: str) -> str:
+    """Prefix each line with its 1-based number so the model can cite exact lines."""
+    lines = source_code.splitlines()
+    width = len(str(len(lines)))
+    return "\n".join(f"{number:>{width}} | {line}" for number, line in enumerate(lines, start=1))
+
+
 def _build_prompt(source_code: str, pylint_output: dict[str, Any] | str) -> list[tuple[str, str]]:
     static_section = _format_static_analysis(pylint_output)
 
@@ -184,7 +193,7 @@ def _build_prompt(source_code: str, pylint_output: dict[str, Any] | str) -> list
     # ✅ FIX: escape user inputs BEFORE using in f-string
     
 
-    safe_code = _escape_for_prompt(source_code[:20000])
+    safe_code = _escape_for_prompt(_number_lines(source_code[:20000]))
     safe_static = _escape_for_prompt(static_section[:12000])
 
     user_prompt = (
@@ -201,17 +210,28 @@ def _build_prompt(source_code: str, pylint_output: dict[str, Any] | str) -> list
         "- missing validation\n"
         "- edge cases\n"
         "- incorrect logic\n\n"
+        "Hard constraints:\n"
+        "- Do NOT provide generic advice.\n"
+        "- Avoid suggestions like 'add type hints', 'add docstrings', 'add error handling',\n"
+        "  'improve readability', or 'use logging' unless tied to concrete code evidence.\n"
+        "- If evidence is weak, return no issue.\n\n"
         "Do not suggest issues that are not relevant to the given programming language.\n"
         "Avoid generic assumptions and unsupported claims.\n\n"
         "Validation rule:\n"
         "- If function parameters already have type hints, do NOT flag missing validation.\n"
         "- Only flag validation issues when unsafe operations are present.\n\n"
+        "Bug format:\n"
+        "- Report each bug as an object with description, line, severity (low, medium, high, critical),\n"
+        "  and confidence (low, medium, high).\n"
+        "- line is the 1-based line number shown in CODE, or 0 when the bug is not tied to one line.\n"
+        "- Use high confidence only when the code itself clearly shows the bug; use low when it depends\n"
+        "  on context you cannot see.\n\n"
         "Fix quality rules:\n"
-        "- Return FULL corrected code for fixes\n"
+        "- Return FULL corrected code for fixes, without the line-number prefixes shown in CODE\n"
         "- Keep fixes minimal and realistic\n\n"
         "Return STRICT JSON only.\n"
         f"JSON schema example:\n{escaped_schema}\n\n"
-        f"CODE:\n{safe_code}\n\n"
+        f"CODE (each line prefixed with its number and ' | '):\n{safe_code}\n\n"
         f"STATIC_ANALYSIS:\n{safe_static}"
     )
 
@@ -474,6 +494,21 @@ def _is_low_value_suggestion(entry: Any) -> bool:
     return any(marker in text for marker in low_value_markers)
 
 
+def _is_generic_suggestion(entry: Any) -> bool:
+    text = _entry_text(entry).lower()
+    generic_markers = (
+        "add logging",
+        "add error handling",
+        "improve readability",
+        "follow best practices",
+        "add comments",
+        "refactor code",
+    )
+    has_generic = any(marker in text for marker in generic_markers)
+    has_context = any(token in text for token in ("function", "line", "null", "exception", "division", "return"))
+    return has_generic and not has_context
+
+
 def _non_empty_lines(source_code: str) -> int:
     return len([line for line in str(source_code or "").splitlines() if line.strip()])
 
@@ -513,7 +548,10 @@ def _is_docstring_suggestion(entry: Any) -> bool:
 
 
 def _prioritize_suggestions(suggestions: list[Any], source_code: str) -> list[Any]:
-    filtered = [item for item in suggestions if not _is_low_value_suggestion(item)]
+    filtered = [
+        item for item in suggestions
+        if not _is_low_value_suggestion(item) and not _is_generic_suggestion(item)
+    ]
     missing_docstring = _is_missing_python_docstring(source_code)
 
     def _rank(item: Any) -> tuple[int, int]:
@@ -639,7 +677,7 @@ def _build_repair_prompt(invalid_output: str) -> list[tuple[str, str]]:
         "Fix it and return only valid JSON.\n"
         "Return ONLY valid JSON. Do not include explanations, markdown, or extra text.\n"
         "Return ONLY JSON. No explanation.\n"
-        f"Required schema:\n{_schema_example()}\n\n"
+        f"Required schema:\n{_escape_for_prompt(_schema_example())}\n\n"
         f"Previous response:\n{safe_invalid}"
     )
 
@@ -656,10 +694,10 @@ def _build_fix_only_prompt(source_code: str, issues: list[Any]) -> list[tuple[st
         "RULES:\n"
         "- Must return JSON\n"
         "- Must include:\n"
-        '  {\n    "description": "...",\n    "code": "FULL corrected code"\n  }\n'
+        '  {{\n    "description": "...",\n    "code": "FULL corrected code"\n  }}\n'
         "- No explanation outside JSON\n\n"
-        f"CODE:\n{source_code[:20000]}\n\n"
-        f"ISSUES:\n{json.dumps(issues, ensure_ascii=False)[:12000]}"
+        f"CODE:\n{_escape_for_prompt(source_code[:20000])}\n\n"
+        f"ISSUES:\n{_escape_for_prompt(json.dumps(issues, ensure_ascii=False)[:12000])}"
     )
     return [
         ("system", "Return only JSON for a single fix object."),
@@ -736,18 +774,23 @@ def _resolve_model_candidates() -> list[str]:
         if item.strip()
     ]
 
-    # Remap known deprecated values to current stable defaults.
+    # Groq retired these models; remap old configs to current equivalents.
     deprecated_map = {
-        "mixtral-8x7b-32768": "llama-3.1-8b-instant",
-        "llama3-70b-8192": "llama-3.1-70b-versatile",
+        "mixtral-8x7b-32768": "openai/gpt-oss-20b",
+        "llama3-70b-8192": "openai/gpt-oss-120b",
+        "llama-3.1-70b-versatile": "openai/gpt-oss-120b",
+        "llama-3.3-70b-versatile": "openai/gpt-oss-120b",
+        "llama-3.1-8b-instant": "openai/gpt-oss-20b",
     }
-    if configured_primary in deprecated_map:
-        logger.warning(
-            "Deprecated model configured (%s). Replacing with %s.",
-            configured_primary,
-            deprecated_map[configured_primary],
-        )
-        configured_primary = deprecated_map[configured_primary]
+
+    def current_name(model: str) -> str:
+        if model in deprecated_map:
+            logger.warning("Retired model configured (%s). Using %s instead.", model, deprecated_map[model])
+            return deprecated_map[model]
+        return model
+
+    configured_primary = current_name(configured_primary)
+    configured_fallbacks = [current_name(model) for model in configured_fallbacks]
 
     ordered = []
     if configured_primary:
@@ -818,6 +861,7 @@ async def generate_llm_review(
                 "final_score": 0,
             },
             "reasoning": "Model was not executed because GROQ_API_KEY is missing.",
+            "status": "skipped",
         }
 
     model_candidates = _resolve_model_candidates()
@@ -836,9 +880,6 @@ async def generate_llm_review(
                 prompt=prompt,
                 start_index=active_model_index,
             )
-            print("\n========== RAW LLM RESPONSE ==========\n")
-            print(response)
-            print("\n=====================================\n")
             raw_output = str(response.content)
             logger.info("Raw LLM response (attempt %d): %s", attempt, raw_output)
             payload = _extract_json_payload(raw_output)
@@ -878,9 +919,6 @@ async def generate_llm_review(
                 prompt=repair_prompt,
                 start_index=active_model_index,
             )
-            print("\n========== RAW LLM RESPONSE ==========\n")
-            print(response)
-            print("\n=====================================\n")
             raw_output = str(response.content)
             logger.info("Raw LLM repair response (attempt %d): %s", attempt, raw_output)
             try:
@@ -925,5 +963,6 @@ async def generate_llm_review(
             "maintainability": 0,
             "final_score": 0,
         },
-        "reasoning": raw_output[:500] if raw_output else "No response"
+        "reasoning": raw_output[:500] if raw_output else "No response",
+        "status": "failed",
     }
