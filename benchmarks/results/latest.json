@@ -1,0 +1,938 @@
+{
+  "generated_at": "2026-09-14 15:22 UTC",
+  "llm_model": "openai/gpt-oss-120b",
+  "llm_fallback_model": "openai/gpt-oss-20b",
+  "case_count": 40,
+  "buggy_case_count": 30,
+  "case_ids": [
+    "division-by-zero-literal",
+    "division-by-empty-length",
+    "missing-key-on-empty-dict",
+    "index-past-end",
+    "loop-reads-past-end",
+    "regex-match-may-be-none",
+    "sql-injection",
+    "subprocess-shell-injection",
+    "eval-on-input",
+    "hardcoded-api-key",
+    "pickle-untrusted-data",
+    "file-never-closed",
+    "mutable-default-argument",
+    "exception-swallowed",
+    "recursion-without-base-case",
+    "late-binding-lambda",
+    "computed-value-not-returned",
+    "identity-compare-with-literal",
+    "range-check-always-true",
+    "unreachable-code",
+    "list-mutated-while-iterating",
+    "variable-maybe-unassigned",
+    "string-plus-int",
+    "float-equality",
+    "insecure-random-token",
+    "path-traversal",
+    "shared-class-attribute",
+    "counter-overwritten",
+    "default-evaluated-once",
+    "sort-returns-none",
+    "clean-typed-add",
+    "clean-guarded-mean",
+    "clean-context-manager",
+    "clean-parameterized-sql",
+    "clean-factorial",
+    "clean-none-default",
+    "clean-secure-token",
+    "clean-dict-get",
+    "clean-guarded-regex",
+    "clean-filter-comprehension"
+  ],
+  "summaries": {
+    "static": {
+      "cases_scored": 40,
+      "cases_failed": 0,
+      "buggy_cases": 30,
+      "clean_cases": 10,
+      "bugs_detected": 8,
+      "recall": 0.267,
+      "findings": 10,
+      "correct_findings": 8,
+      "precision": 0.8,
+      "clean_cases_flagged": 1,
+      "false_alarm_rate": 0.1
+    },
+    "llm": {
+      "cases_scored": 40,
+      "cases_failed": 0,
+      "buggy_cases": 30,
+      "clean_cases": 10,
+      "bugs_detected": 29,
+      "recall": 0.967,
+      "findings": 40,
+      "correct_findings": 35,
+      "precision": 0.875,
+      "clean_cases_flagged": 3,
+      "false_alarm_rate": 0.3
+    },
+    "hybrid": {
+      "cases_scored": 40,
+      "cases_failed": 0,
+      "buggy_cases": 30,
+      "clean_cases": 10,
+      "bugs_detected": 30,
+      "recall": 1.0,
+      "findings": 49,
+      "correct_findings": 42,
+      "precision": 0.857,
+      "clean_cases_flagged": 4,
+      "false_alarm_rate": 0.4
+    }
+  },
+  "results": {
+    "static": [
+      {
+        "case_id": "division-by-zero-literal",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "division-by-empty-length",
+        "has_bug": true,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "missing-key-on-empty-dict",
+        "has_bug": true,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "index-past-end",
+        "has_bug": true,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "loop-reads-past-end",
+        "has_bug": true,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "regex-match-may-be-none",
+        "has_bug": true,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "sql-injection",
+        "has_bug": true,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "subprocess-shell-injection",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "eval-on-input",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "hardcoded-api-key",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "pickle-untrusted-data",
+        "has_bug": true,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "file-never-closed",
+        "has_bug": true,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "mutable-default-argument",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "exception-swallowed",
+        "has_bug": true,
+        "findings": 2,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "recursion-without-base-case",
+        "has_bug": true,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "late-binding-lambda",
+        "has_bug": true,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "computed-value-not-returned",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "identity-compare-with-literal",
+        "has_bug": true,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "range-check-always-true",
+        "has_bug": true,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "unreachable-code",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "list-mutated-while-iterating",
+        "has_bug": true,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "variable-maybe-unassigned",
+        "has_bug": true,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "string-plus-int",
+        "has_bug": true,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "float-equality",
+        "has_bug": true,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "insecure-random-token",
+        "has_bug": true,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "path-traversal",
+        "has_bug": true,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "shared-class-attribute",
+        "has_bug": true,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "counter-overwritten",
+        "has_bug": true,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "default-evaluated-once",
+        "has_bug": true,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "sort-returns-none",
+        "has_bug": true,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-typed-add",
+        "has_bug": false,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-guarded-mean",
+        "has_bug": false,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-context-manager",
+        "has_bug": false,
+        "findings": 1,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-parameterized-sql",
+        "has_bug": false,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-factorial",
+        "has_bug": false,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-none-default",
+        "has_bug": false,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-secure-token",
+        "has_bug": false,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-dict-get",
+        "has_bug": false,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-guarded-regex",
+        "has_bug": false,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-filter-comprehension",
+        "has_bug": false,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      }
+    ],
+    "llm": [
+      {
+        "case_id": "division-by-zero-literal",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "division-by-empty-length",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "missing-key-on-empty-dict",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "index-past-end",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "loop-reads-past-end",
+        "has_bug": true,
+        "findings": 2,
+        "correct": 2,
+        "error": ""
+      },
+      {
+        "case_id": "regex-match-may-be-none",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "sql-injection",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "subprocess-shell-injection",
+        "has_bug": true,
+        "findings": 3,
+        "correct": 3,
+        "error": ""
+      },
+      {
+        "case_id": "eval-on-input",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "hardcoded-api-key",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "pickle-untrusted-data",
+        "has_bug": true,
+        "findings": 2,
+        "correct": 2,
+        "error": ""
+      },
+      {
+        "case_id": "file-never-closed",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "mutable-default-argument",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "exception-swallowed",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "recursion-without-base-case",
+        "has_bug": true,
+        "findings": 2,
+        "correct": 2,
+        "error": ""
+      },
+      {
+        "case_id": "late-binding-lambda",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "computed-value-not-returned",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "identity-compare-with-literal",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "range-check-always-true",
+        "has_bug": true,
+        "findings": 2,
+        "correct": 2,
+        "error": ""
+      },
+      {
+        "case_id": "unreachable-code",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "list-mutated-while-iterating",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "variable-maybe-unassigned",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "string-plus-int",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "float-equality",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "insecure-random-token",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "path-traversal",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "shared-class-attribute",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "counter-overwritten",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "default-evaluated-once",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "sort-returns-none",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "clean-typed-add",
+        "has_bug": false,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-guarded-mean",
+        "has_bug": false,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-context-manager",
+        "has_bug": false,
+        "findings": 1,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-parameterized-sql",
+        "has_bug": false,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-factorial",
+        "has_bug": false,
+        "findings": 2,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-none-default",
+        "has_bug": false,
+        "findings": 1,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-secure-token",
+        "has_bug": false,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-dict-get",
+        "has_bug": false,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-guarded-regex",
+        "has_bug": false,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-filter-comprehension",
+        "has_bug": false,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      }
+    ],
+    "hybrid": [
+      {
+        "case_id": "division-by-zero-literal",
+        "has_bug": true,
+        "findings": 2,
+        "correct": 2,
+        "error": ""
+      },
+      {
+        "case_id": "division-by-empty-length",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "missing-key-on-empty-dict",
+        "has_bug": true,
+        "findings": 2,
+        "correct": 2,
+        "error": ""
+      },
+      {
+        "case_id": "index-past-end",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "loop-reads-past-end",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "regex-match-may-be-none",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "sql-injection",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "subprocess-shell-injection",
+        "has_bug": true,
+        "findings": 2,
+        "correct": 2,
+        "error": ""
+      },
+      {
+        "case_id": "eval-on-input",
+        "has_bug": true,
+        "findings": 2,
+        "correct": 2,
+        "error": ""
+      },
+      {
+        "case_id": "hardcoded-api-key",
+        "has_bug": true,
+        "findings": 3,
+        "correct": 2,
+        "error": ""
+      },
+      {
+        "case_id": "pickle-untrusted-data",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "file-never-closed",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "mutable-default-argument",
+        "has_bug": true,
+        "findings": 2,
+        "correct": 2,
+        "error": ""
+      },
+      {
+        "case_id": "exception-swallowed",
+        "has_bug": true,
+        "findings": 4,
+        "correct": 3,
+        "error": ""
+      },
+      {
+        "case_id": "recursion-without-base-case",
+        "has_bug": true,
+        "findings": 2,
+        "correct": 2,
+        "error": ""
+      },
+      {
+        "case_id": "late-binding-lambda",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "computed-value-not-returned",
+        "has_bug": true,
+        "findings": 2,
+        "correct": 2,
+        "error": ""
+      },
+      {
+        "case_id": "identity-compare-with-literal",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "range-check-always-true",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "unreachable-code",
+        "has_bug": true,
+        "findings": 3,
+        "correct": 2,
+        "error": ""
+      },
+      {
+        "case_id": "list-mutated-while-iterating",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "variable-maybe-unassigned",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "string-plus-int",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "float-equality",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "insecure-random-token",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "path-traversal",
+        "has_bug": true,
+        "findings": 2,
+        "correct": 2,
+        "error": ""
+      },
+      {
+        "case_id": "shared-class-attribute",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "counter-overwritten",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "default-evaluated-once",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "sort-returns-none",
+        "has_bug": true,
+        "findings": 1,
+        "correct": 1,
+        "error": ""
+      },
+      {
+        "case_id": "clean-typed-add",
+        "has_bug": false,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-guarded-mean",
+        "has_bug": false,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-context-manager",
+        "has_bug": false,
+        "findings": 1,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-parameterized-sql",
+        "has_bug": false,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-factorial",
+        "has_bug": false,
+        "findings": 1,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-none-default",
+        "has_bug": false,
+        "findings": 1,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-secure-token",
+        "has_bug": false,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-dict-get",
+        "has_bug": false,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-guarded-regex",
+        "has_bug": false,
+        "findings": 1,
+        "correct": 0,
+        "error": ""
+      },
+      {
+        "case_id": "clean-filter-comprehension",
+        "has_bug": false,
+        "findings": 0,
+        "correct": 0,
+        "error": ""
+      }
+    ]
+  }
+}
