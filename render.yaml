@@ -20,8 +20,11 @@ services:
   - type: web
     name: codesense-ai-web
     runtime: static
-    buildCommand: cd frontend && npm ci && npm run build
-    staticPublishPath: ./frontend/dist
+    # Build from frontend/ so Render doesn't find the root requirements.txt and try to install
+    # the Python backend (which failed on Render's default Python 3.14).
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
     envVars:
       # Set to the API URL once it is deployed, e.g. https://codesense-ai-api.onrender.com
       - key: VITE_API_BASE_URL
