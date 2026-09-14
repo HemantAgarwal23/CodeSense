@@ -8,13 +8,17 @@ const api = axios.create({
   }
 });
 
+// Repository and pull request reviews make one LLM call per file, and Groq's
+// free tier throttles those calls, so allow more time than a snippet needs.
+const MULTI_FILE_TIMEOUT_MS = 300000;
+
 export async function runReview(payload) {
-  const response = await api.post("/api/v1/review", payload);
+  const config = payload.repo_url ? { timeout: MULTI_FILE_TIMEOUT_MS } : undefined;
+  const response = await api.post("/api/v1/review", payload, config);
   return response.data;
 }
 
 export async function runPullRequestReview(payload) {
-  // Pull requests can touch many files, each needing its own LLM call.
-  const response = await api.post("/api/v1/review/pr", payload, { timeout: 300000 });
+  const response = await api.post("/api/v1/review/pr", payload, { timeout: MULTI_FILE_TIMEOUT_MS });
   return response.data;
 }

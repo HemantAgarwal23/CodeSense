@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, model_validator
 class ReviewRequest(BaseModel):
     repo_url: Optional[str] = None
     code_snippet: Optional[str] = None
+    filename: Optional[str] = None
     branch: str = "main"
     max_files: Optional[int] = Field(default=None, ge=1)
 

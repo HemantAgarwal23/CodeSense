@@ -5,7 +5,13 @@ import ResultsPanel from "./components/ResultsPanel";
 import { runPullRequestReview, runReview } from "./lib/api";
 
 function extractErrorMessage(error) {
-  const detail = error?.response?.data?.detail;
+  if (error?.code === "ECONNABORTED") {
+    return "The review timed out. Reviewing many files can hit Groq's free-tier rate limits; try fewer files.";
+  }
+  if (!error?.response) {
+    return "Cannot reach the API. Check that the backend is running on port 8000.";
+  }
+  const detail = error.response.data?.detail;
   if (typeof detail === "string") {
     return detail;
   }
@@ -23,7 +29,7 @@ export default function App() {
   const [repoUrl, setRepoUrl] = useState("");
   const [prUrl, setPrUrl] = useState("");
   const [postComments, setPostComments] = useState(false);
-  const [maxFiles, setMaxFiles] = useState("20");
+  const [maxFiles, setMaxFiles] = useState("5");
   const [uploadedFileName, setUploadedFileName] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -58,6 +64,7 @@ export default function App() {
         : await runReview({
             provider: "groq",
             code: code.trim() || undefined,
+            filename: uploadedFileName || undefined,
             repo_url: repoUrl.trim() || undefined,
             max_files: maxFilesValue
           });

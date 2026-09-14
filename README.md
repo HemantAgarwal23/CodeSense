@@ -88,6 +88,7 @@ On Windows, `scripts\start-backend.bat` and `scripts\start-frontend.bat` start e
 | `MAX_REPO_FILES` | `50` | Most files reviewed per repository or pull request (one LLM call each) |
 | `MAX_CODE_CHARS` | `100000` | Largest snippet accepted |
 | `LLM_MODEL` / `LLM_FALLBACK_MODEL` | `openai/gpt-oss-120b` / `openai/gpt-oss-20b` | Groq models |
+| `LLM_MAX_CONCURRENCY` | `2` | Files reviewed in parallel; higher values hit Groq free-tier rate limits sooner |
 
 The frontend reads `VITE_API_BASE_URL` (default `http://127.0.0.1:8000`).
 
@@ -106,7 +107,7 @@ Responses include `findings` (`runtime_risks`, `code_issues`, `fixes`, `suggesti
 [render.yaml](render.yaml) defines the API (Docker) and the frontend (static site) for [Render](https://render.com):
 
 1. In Render, choose **New > Blueprint** and select this repository.
-2. Set `GROQ_API_KEY`, and optionally `GITHUB_TOKEN`, on `codesense-ai-api`.
+2. Set `GROQ_API_KEY` on `codesense-ai-api`. Leave `GITHUB_TOKEN` empty on a public deployment: the server posts pull request comments with that token, so any visitor could post reviews through your GitHub account.
 3. Once both services are live, set `CORS_ORIGINS` on the API to the frontend URL and `VITE_API_BASE_URL` on the frontend to the API URL, then redeploy the frontend.
 
 Free Render instances sleep when idle, so the first request after a pause is slow.
@@ -139,6 +140,8 @@ tests/             API, static analysis, findings, pull request, and security te
 - Static analysis parses Python only; JavaScript, TypeScript, Java, and C++ files get LLM review alone.
 - LLM output varies between runs, so `llm` and `hybrid` benchmark numbers shift slightly from run to run.
 - Repository review needs Git installed and a public repository (or a token with access).
+- Groq's free tier allows 8,000 tokens per minute and 200,000 tokens per day per model (roughly two to four files a minute), so repository and pull request reviews of more than a few files take minutes, and a full benchmark run uses a large share of the daily budget. Keep `max_files` small or use a paid Groq tier.
+- The LLM sees the first 10,000 characters of each file (static analysis still reads the whole file) so each request fits the free-tier token limit.
 
 ## Tech stack
 

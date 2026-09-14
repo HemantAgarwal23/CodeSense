@@ -13,8 +13,9 @@ services:
       # Set to the frontend URL once it is deployed, e.g. https://codesense-ai-web.onrender.com
       - key: CORS_ORIGINS
         sync: false
+      # Every file costs one LLM call against the Groq free-tier budget, so keep public reviews small.
       - key: MAX_REPO_FILES
-        value: "20"
+        value: "5"
 
   - type: web
     name: codesense-ai-web

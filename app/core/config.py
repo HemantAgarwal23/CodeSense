@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     max_code_chars: int = Field(default=100_000, alias="MAX_CODE_CHARS")
     llm_model: str = Field(default="openai/gpt-oss-120b", alias="LLM_MODEL")
     llm_fallback_model: str = Field(default="openai/gpt-oss-20b", alias="LLM_FALLBACK_MODEL")
+    llm_max_concurrency: int = Field(default=2, ge=1, alias="LLM_MAX_CONCURRENCY")
 
     model_config = SettingsConfigDict(
         env_file=".env",

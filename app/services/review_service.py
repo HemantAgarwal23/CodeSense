@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import asyncio
 import json
 import logging
@@ -91,7 +92,7 @@ class ReviewService:
         if req.repo_url:
             result = await self._run_repo_review(req.repo_url, req.branch, req.max_files)
         else:
-            result = await self._run_raw_code_review(req.code_snippet or "")
+            result = await self._run_raw_code_review(req.code_snippet or "", req.filename)
         result["findings"] = build_findings(result.get("files", []), req.code_snippet or "")
         return result
 
@@ -169,10 +170,10 @@ class ReviewService:
                 "final_score": 0.0,
             }
 
-    async def _run_raw_code_review(self, code: str) -> dict[str, Any]:
-        """Process a raw code snippet as a synthetic single file."""
+    async def _run_raw_code_review(self, code: str, filename: str | None = None) -> dict[str, Any]:
+        """Process a raw code snippet as a synthetic single file named after its language."""
         with tempfile.TemporaryDirectory(prefix="review_raw_") as temp_dir:
-            file_path = Path(temp_dir) / "inline_input.py"
+            file_path = Path(temp_dir) / self._snippet_filename(code, filename)
             await asyncio.to_thread(file_path.write_text, code, "utf-8")
             logger.info("Processing raw code input via synthetic file: %s", file_path)
             file_results = await self._process_files([str(file_path.resolve())])
@@ -225,6 +226,34 @@ class ReviewService:
         result["review_comments"] = comments
         result["findings"] = build_findings(result["files"])
         return result
+
+    @staticmethod
+    def _snippet_filename(code: str, filename: str | None) -> str:
+        """Pick a file name whose extension matches the snippet's language.
+
+        The Python AST analyzer reports bogus syntax errors on other languages. An uploaded
+        file's extension wins; otherwise code that parses as Python is Python, and anything
+        else is classified by obvious language markers (falling back to Python, so real
+        Python syntax errors are still reported).
+        """
+        name = Path(filename or "").name
+        if Path(name).suffix.lower() in SUPPORTED_EXTENSIONS:
+            return name
+        try:
+            ast.parse(code)
+            return "snippet.py"
+        except (SyntaxError, ValueError):
+            pass
+        language_markers = (
+            (".java", ("public class ", "System.out.println", "public static void main")),
+            (".cpp", ("#include", "std::", "int main(")),
+            (".ts", ("interface ", ": string", ": number")),
+            (".js", ("function ", "const ", "let ", "=>", "console.log", "require(")),
+        )
+        for suffix, markers in language_markers:
+            if any(marker in code for marker in markers):
+                return f"snippet{suffix}"
+        return "snippet.py"
 
     @staticmethod
     def _file_limit(max_files: int | None) -> int:
@@ -401,6 +430,11 @@ class ReviewService:
             base_result["score"] = self._normalize_score(
                 llm_result.get("score", base_result["score"])
             )
+            rubric_empty = not any(value for key, value in base_result["score"].items() if key != "final_score")
+            if llm_unavailable or rubric_empty:
+                # No usable LLM rubric (a failure, or placeholder zeros echoed back): score from static analysis.
+                fallback_score = static_result.get("score") if language == "python" else 10.0
+                base_result["score"]["final_score"] = int(round(float(fallback_score or 0)))
             base_result["score"]["final_score"] = int(
                 min(
                     base_result["score"]["final_score"],
@@ -504,8 +538,9 @@ class ReviewService:
         computed_final = readability + correctness + efficiency + best_practices + maintainability
         final_score = int(self._to_bounded_number(score.get("final_score", computed_final), 0, 10))
 
-        # Ensure final score cannot exceed rubric cap and remains consistent.
-        final_score = min(final_score, 10, computed_final)
+        # Keep the final score consistent with the rubric, unless the rubric is empty
+        # (the score then came from static analysis instead of the LLM).
+        final_score = min(final_score, 10, computed_final) if computed_final else min(final_score, 10)
 
         return {
             "readability": readability,

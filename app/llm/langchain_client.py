@@ -26,6 +26,15 @@ DEFAULT_GROQ_MODELS = [
     "openai/gpt-oss-20b",
 ]
 
+# Groq's free tier allows 8,000 tokens per minute per model, counting the prompt plus
+# max_tokens. These caps keep any single request under that so it is never rejected outright.
+MAX_PROMPT_CODE_CHARS = 10_000
+MAX_PROMPT_CONTEXT_CHARS = 3_000
+MAX_COMPLETION_TOKENS = 3_000
+# gpt-oss-20b at default effort can spend the whole completion budget on hidden reasoning and
+# return no answer; low effort keeps its reply well inside MAX_COMPLETION_TOKENS.
+REASONING_EFFORT_BY_MODEL = {"openai/gpt-oss-20b": "low"}
+
 
 class LLMResponseParseError(Exception):
     """Raised when LLM output cannot be parsed into required JSON schema."""
@@ -193,8 +202,8 @@ def _build_prompt(source_code: str, pylint_output: dict[str, Any] | str) -> list
     # ✅ FIX: escape user inputs BEFORE using in f-string
     
 
-    safe_code = _escape_for_prompt(_number_lines(source_code[:20000]))
-    safe_static = _escape_for_prompt(static_section[:12000])
+    safe_code = _escape_for_prompt(_number_lines(source_code[:MAX_PROMPT_CODE_CHARS]))
+    safe_static = _escape_for_prompt(static_section[:MAX_PROMPT_CONTEXT_CHARS])
 
     user_prompt = (
         "Analyze the code and static analysis output.\n"
@@ -696,8 +705,8 @@ def _build_fix_only_prompt(source_code: str, issues: list[Any]) -> list[tuple[st
         "- Must include:\n"
         '  {{\n    "description": "...",\n    "code": "FULL corrected code"\n  }}\n'
         "- No explanation outside JSON\n\n"
-        f"CODE:\n{_escape_for_prompt(source_code[:20000])}\n\n"
-        f"ISSUES:\n{_escape_for_prompt(json.dumps(issues, ensure_ascii=False)[:12000])}"
+        f"CODE:\n{_escape_for_prompt(source_code[:MAX_PROMPT_CODE_CHARS])}\n\n"
+        f"ISSUES:\n{_escape_for_prompt(json.dumps(issues, ensure_ascii=False)[:MAX_PROMPT_CONTEXT_CHARS])}"
     )
     return [
         ("system", "Return only JSON for a single fix object."),
@@ -758,10 +767,13 @@ def _fallback_response() -> dict[str, Any]:
 
 def _build_llm(model_name: str) -> ChatGroq:
     """Create a Groq chat client for a specific model."""
+    reasoning_effort = REASONING_EFFORT_BY_MODEL.get(model_name)
     return ChatGroq(
         model=model_name,
         api_key=settings.groq_api_key,
         temperature=0.2,
+        max_tokens=MAX_COMPLETION_TOKENS,
+        model_kwargs={"reasoning_effort": reasoning_effort} if reasoning_effort else {},
     )
 
 
@@ -907,6 +919,9 @@ async def generate_llm_review(
             logger.warning("LLM JSON parse failed on attempt %d/%d: %s", attempt, total_attempts, exc)
             if attempt == total_attempts:
                 break
+            if not raw_output.strip():
+                # An empty reply has nothing to repair; the repair prompt would only echo schema placeholders.
+                continue
             repair_prompt = ChatPromptTemplate.from_messages(
                 _build_repair_prompt(invalid_output=raw_output)
             )

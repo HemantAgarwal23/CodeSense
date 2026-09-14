@@ -18,12 +18,15 @@ logger = logging.getLogger(__name__)
 
 # Git ref names only; a leading "-" could be read as a git command-line option.
 BRANCH_PATTERN = r"^[A-Za-z0-9._][A-Za-z0-9._/-]*$"
+# Plain file names only (no paths); the extension tells the service which language a snippet is.
+FILENAME_PATTERN = r"^[A-Za-z0-9._ -]+$"
 
 
 class ReviewApiRequest(BaseModel):
     """Public API request contract for review endpoint."""
 
     code: str | None = None
+    filename: str | None = Field(default=None, max_length=255, pattern=FILENAME_PATTERN)
     repo_url: str | None = None
     provider: Literal["groq"] = "groq"
     branch: str = Field(default="main", max_length=255, pattern=BRANCH_PATTERN)
@@ -120,6 +123,7 @@ async def review_code(
         request_model = ReviewRequest(
             repo_url=payload.repo_url,
             code_snippet=payload.code,
+            filename=payload.filename,
             branch=payload.branch,
             max_files=payload.max_files,
         )
