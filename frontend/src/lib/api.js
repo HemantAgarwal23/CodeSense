@@ -13,3 +13,8 @@ export async function runReview(payload) {
   return response.data;
 }
 
+export async function runPullRequestReview(payload) {
+  // Pull requests can touch many files, each needing its own LLM call.
+  const response = await api.post("/api/v1/review/pr", payload, { timeout: 300000 });
+  return response.data;
+}

@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import CollapsibleSection from "./CollapsibleSection";
 import Spinner from "./Spinner";
 
+const EMPTY_FINDINGS = { runtime_risks: [], code_issues: [], fixes: [], suggestions: [] };
+
 function getScorePalette(score) {
   const value = Math.max(0, Math.min(10, Number(score) || 0));
   if (value <= 4) {
@@ -37,190 +39,11 @@ function getScoreInterpretation(score) {
   return "Good";
 }
 
-function normalizeText(value) {
-  return String(value || "").replace(/\s+/g, " ").trim();
-}
-
-function canonicalize(value) {
-  return normalizeText(value).toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
-}
-
-function extractFixCode(item) {
-  if (!item || typeof item !== "object") {
+function formatLocation(finding) {
+  if (!finding?.file) {
     return "";
   }
-  const codeValue =
-    item.fix_code ||
-    item.fixed_code ||
-    item.replacement_code ||
-    item.updated_code ||
-    item.code ||
-    item.snippet;
-  return typeof codeValue === "string" ? codeValue.trim() : "";
-}
-
-function extractDescription(item) {
-  if (typeof item === "string") {
-    const text = normalizeText(item);
-    return text || ""; // ❗ NO fallback
-  }
-
-  if (!item || typeof item !== "object") {
-    return ""; // ❗ NO fallback
-  }
-
-  const text = normalizeText(
-    item.description ||
-    item.message ||
-    item.title ||
-    item.reason ||
-    item.text ||
-    item.details ||
-    item.summary
-  );
-
-  return text || ""; // ❗ NO fallback
-}
-
-function extractItemType(item, fallbackType) {
-  if (!item || typeof item !== "object") {
-    return fallbackType;
-  }
-  const rawType = item.type || item.category || item.severity || item.level || item.kind || item.symbol || fallbackType;
-  return normalizeText(rawType).toUpperCase() || fallbackType;
-}
-
-function hasFunctionParamTypeHints(code) {
-  const source = String(code || "");
-  return /def\s+[A-Za-z_]\w*\s*\([^)]*:\s*[^)]*\)\s*:/m.test(source);
-}
-
-function isTypeValidationFalsePositive(description) {
-  const text = description.toLowerCase();
-  return (
-    text.includes("missing type validation") ||
-    text.includes("missing input validation") ||
-    text.includes("add input validation") ||
-    text.includes("type check")
-  );
-}
-
-function extractFunctionName(description) {
-  const text = String(description || "");
-  const patterns = [
-    /\b(?:function|method|def)\s+([A-Za-z_]\w*)\b/i,
-    /\bin\s+([A-Za-z_]\w*)\s*\(/i,
-    /\bfor\s+([A-Za-z_]\w*)\s*\(/i
-  ];
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match?.[1]) {
-      return match[1];
-    }
-  }
-  return "global";
-}
-
-function looksLikePython(code) {
-  const source = String(code || "");
-  return /\bdef\s+[A-Za-z_]\w*\s*\(/.test(source) || /\bimport\s+[A-Za-z_]/.test(source);
-}
-
-function isGenericOverflowWarning(description, code) {
-  const text = String(description || "").toLowerCase();
-  if (!text.includes("overflow")) {
-    return false;
-  }
-  if (!looksLikePython(code)) {
-    return false;
-  }
-  return !/(32-bit|64-bit|fixed[-\s]?width|integer limit|c\+\+|cpp|javascript|typed array)/i.test(text);
-}
-
-function limitRuntimeNoise(items, maxPerFunction = 2) {
-  const counts = new Map();
-  const kept = [];
-  for (const item of items) {
-    const fnName = extractFunctionName(item.description);
-    const current = counts.get(fnName) || 0;
-    if (current >= maxPerFunction) {
-      continue;
-    }
-    counts.set(fnName, current + 1);
-    kept.push(item);
-  }
-  return kept;
-}
-
-function adjustScore(result) {
-  const bugs = result?.bugs?.length || 0;
-  const runtimeRisks = result?.runtime_risks?.length || 0;
-  const codeIssues = result?.code_issues?.length || 0;
-
-  if (bugs === 0 && runtimeRisks === 0 && codeIssues === 0) {
-    return 10;
-  }
-
-  let score = 10;
-  score -= bugs * 2;
-  score -= runtimeRisks * 1;
-  score -= codeIssues * 0.5;
-
-  return Math.max(0, Math.round(score));
-}
-
-function isMinorSuggestion(description) {
-  const text = String(description || "").toLowerCase();
-  return (
-    text.includes("docstring") ||
-    text.includes("readability") ||
-    text.includes("style") ||
-    text.includes("naming") ||
-    text.includes("comment") ||
-    text.includes("best practice") ||
-    text.includes("optional") ||
-    text.includes("refactor")
-  );
-}
-
-function dedupeAndNormalize(items, sectionType, typedCodePresent) {
-  const map = new Map();
-  const fallbackType = String(sectionType || "ITEM").toUpperCase();
-
-  for (const raw of items || []) {
-    const description = extractDescription(raw);
-if (!description) continue; // ❗ DROP empty / fake items
-    if (typedCodePresent && isTypeValidationFalsePositive(description)) {
-      continue;
-    }
-
-    const itemType = extractItemType(raw, fallbackType);
-    const codeSnippet = sectionType === "fix" ? extractFixCode(raw) : "";
-    const normalizedKey = canonicalize(
-      `${itemType} ${description.replace(/\b(docstring|docstrings)\b/gi, "docstring")}`
-    );
-    if (!normalizedKey) {
-      continue;
-    }
-
-    if (!map.has(normalizedKey)) {
-      map.set(normalizedKey, {
-        raw,
-        itemType,
-        description,
-        codeSnippet,
-        duplicateCount: 1
-      });
-    } else {
-      const existing = map.get(normalizedKey);
-      existing.duplicateCount += 1;
-      if (!existing.codeSnippet && codeSnippet) {
-        existing.codeSnippet = codeSnippet;
-      }
-    }
-  }
-
-  return Array.from(map.values());
+  return finding.line ? `${finding.file}:${finding.line}` : finding.file;
 }
 
 function ScoreRing({ score }) {
@@ -284,40 +107,56 @@ function CleanState() {
   );
 }
 
-function getFixCopyText(item) {
-  if (!item) {
-    return "";
-  }
-  const codeValue = extractFixCode(item);
-  if (codeValue) {
-    return codeValue;
-  }
-  return extractDescription(item);
+function PullRequestSummary({ pullRequest, commentCount }) {
+  return (
+    <div className="rounded-lg border border-app-border bg-app-panelAlt p-3 text-xs text-app-muted">
+      <p className="text-[11px] uppercase tracking-wide">Pull Request</p>
+      <a
+        href={pullRequest.url}
+        target="_blank"
+        rel="noreferrer"
+        className="mt-1 block text-sm font-medium text-cyan-200 hover:underline"
+      >
+        {pullRequest.title || pullRequest.url}
+      </a>
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+        <span>
+          Files reviewed: {pullRequest.files_reviewed} of {pullRequest.files_changed}
+        </span>
+        <span>Findings on changed lines: {commentCount}</span>
+        {pullRequest.comments_posted ? (
+          <span className="text-emerald-300">Posted {pullRequest.comments_posted} comments to GitHub</span>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
-function ItemRow({ item, type, onApplyFix, onCopyFix, copied }) {
-  const defaultType = String(type || "item").toUpperCase();
+function ItemRow({ item, type, canApplyFix, onApplyFix, onCopyFix, copied }) {
   const typeStyle =
     type === "bug"
       ? "border-red-500/30 bg-red-500/10 text-red-200"
       : type === "fix"
         ? "border-green-500/30 bg-green-500/10 text-green-200"
         : "border-cyan-500/30 bg-cyan-500/10 text-cyan-200";
-  const itemType = item?.itemType || defaultType;
-  const description = item?.description || "Analyzer returned an item without details.";
-  const snippet = item?.codeSnippet || "";
-  const duplicateCount = item?.duplicateCount || 1;
+  const location = formatLocation(item);
 
   return (
     <li className="rounded-md border border-app-border bg-[#0d1525] px-3 py-2.5 text-sm leading-6 text-app-text transition-colors duration-150 hover:border-slate-500 hover:bg-[#111a2b]">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className={`rounded-full border px-2 py-0.5 text-[11px] uppercase tracking-wide ${typeStyle}`}>
-            {itemType}
+            {item.label}
           </span>
-          {duplicateCount > 1 ? (
+          <span className="rounded-full border border-app-border px-2 py-0.5 text-[10px] tracking-wide text-app-text">
+            Severity: {String(item.severity).toUpperCase()}
+          </span>
+          <span className="rounded-full border border-app-border px-2 py-0.5 text-[10px] tracking-wide text-app-muted">
+            Confidence: {String(item.confidence).toUpperCase()}
+          </span>
+          {item.count > 1 ? (
             <span className="rounded-full border border-app-border px-2 py-0.5 text-[10px] uppercase tracking-wide text-app-muted">
-              x{duplicateCount}
+              x{item.count}
             </span>
           ) : null}
         </div>
@@ -326,27 +165,30 @@ function ItemRow({ item, type, onApplyFix, onCopyFix, copied }) {
             {copied ? <span className="text-[11px] text-cyan-300">Copied!</span> : null}
             <button
               type="button"
-              onClick={() => onCopyFix?.(item)}
+              onClick={onCopyFix}
               className="rounded-md border border-app-border bg-app-panelAlt px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-app-text hover:border-slate-400"
             >
               Copy Fix
             </button>
-            <button
-              type="button"
-              onClick={() => onApplyFix?.(item)}
-              className="rounded-md border border-cyan-500/50 bg-cyan-500/10 px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-cyan-200 hover:border-cyan-400 hover:bg-cyan-500/20"
-            >
-              Apply Fix
-            </button>
+            {canApplyFix ? (
+              <button
+                type="button"
+                onClick={onApplyFix}
+                className="rounded-md border border-cyan-500/50 bg-cyan-500/10 px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-cyan-200 hover:border-cyan-400 hover:bg-cyan-500/20"
+              >
+                Apply Fix
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>
-      <p className="text-sm text-app-text">{description}</p>
-      {type === "fix" && snippet ? (
+      <p className="text-sm text-app-text">{item.description}</p>
+      {location ? <p className="mt-1 text-xs text-app-muted">Location: {location}</p> : null}
+      {type === "fix" && item.code ? (
         <div className="mt-2 space-y-1">
           <p className="text-[11px] uppercase tracking-wide text-cyan-300">Suggested Fix (Full Code)</p>
           <pre className="overflow-x-auto rounded-md border border-app-border bg-[#0b1322] p-2 font-mono text-[12px] leading-5 text-cyan-100">
-            <code>{snippet}</code>
+            <code>{item.code}</code>
           </pre>
         </div>
       ) : null}
@@ -354,8 +196,8 @@ function ItemRow({ item, type, onApplyFix, onCopyFix, copied }) {
   );
 }
 
-function ListItems({ items, empty, type, onApplyFix, onCopyFix, copiedKey }) {
-  if (!items?.length) {
+function ListItems({ items, empty, type, canApplyFix, onApplyFix, onCopyFix, copiedKey }) {
+  if (!items.length) {
     return <p className="text-sm text-app-muted">{empty}</p>;
   }
 
@@ -363,11 +205,12 @@ function ListItems({ items, empty, type, onApplyFix, onCopyFix, copiedKey }) {
     <ul className="space-y-2">
       {items.map((item, idx) => (
         <ItemRow
-          key={`${idx}-${item.itemType}-${item.description.slice(0, 12)}`}
+          key={`${type}-${idx}-${item.label}`}
           item={item}
           type={type}
-          onApplyFix={() => onApplyFix?.(item.raw)}
-          onCopyFix={() => onCopyFix?.(item.raw, idx)}
+          canApplyFix={canApplyFix}
+          onApplyFix={() => onApplyFix?.(item)}
+          onCopyFix={() => onCopyFix?.(item, idx)}
           copied={copiedKey === `${type}-${idx}`}
         />
       ))}
@@ -375,61 +218,27 @@ function ListItems({ items, empty, type, onApplyFix, onCopyFix, copiedKey }) {
   );
 }
 
-export default function ResultsPanel({ loading, error, result, onApplyFix, code }) {
+export default function ResultsPanel({ loading, error, result, onApplyFix }) {
   const [showResults, setShowResults] = useState(false);
   const [copiedKey, setCopiedKey] = useState("");
   const hasValidResult = Boolean(result && typeof result === "object" && Array.isArray(result.files));
 
-  const files = result?.files || [];
   const summary = result?.summary || {};
+  const isFailureState = String(summary.status || "ok").toLowerCase() === "failed";
   const processingTime = result?.processing_time ?? 0;
+  const findings = { ...EMPTY_FINDINGS, ...(result?.findings || {}) };
+  const { runtime_risks: runtimeRisks, code_issues: codeIssues, fixes, suggestions } = findings;
+  const pullRequest = result?.pull_request?.url ? result.pull_request : null;
+  const reviewComments = result?.review_comments || [];
 
-  const typedParamHintsPresent = hasFunctionParamTypeHints(code);
-  const mergedBugs = dedupeAndNormalize(files.flatMap((f) => f.bugs || []), "bug", typedParamHintsPresent);
-  
-  const mergedSuggestions = dedupeAndNormalize(files.flatMap((f) => f.suggestions || []), "suggestion", typedParamHintsPresent);
-  const rawRuntimeBugs = mergedBugs.filter((item) =>
-    /(runtime|exception|null|none|undefined|indexerror|keyerror|zerodivision|typeerror|valueerror|overflow|crash|memory|out of bounds)/i.test(
-      item.description
-    )
-  );
-  const filteredRuntimeBugs = rawRuntimeBugs.filter((item) => !isGenericOverflowWarning(item.description, code));
-  const runtimeBugs = limitRuntimeNoise(filteredRuntimeBugs, 2);
-  const logicBugs = mergedBugs.filter((item) => !rawRuntimeBugs.includes(item));
-  let mergedFixes = dedupeAndNormalize(
-  files.flatMap((f) => f.fixes || []),
-  "fix",
-  typedParamHintsPresent
-).filter(f => f.codeSnippet);
-
-// ✅ Ensure consistency: if issues exist → at least 1 fix
-// if (
-//   mergedFixes.length === 0 &&
-//   (mergedBugs.length > 0 || runtimeBugs.length > 0 || logicBugs.length > 0)
-// ) {
-//   mergedFixes = [
-//     {
-//       itemType: "FIX",
-//       description: "Add proper error handling or validation to fix the issue",
-//       codeSnippet: code // fallback: show original code
-//     }
-//   ];
-// }
-// ❗ STRICT: Only allow REAL fixes
-if (mergedFixes.length === 0) {
-  mergedFixes = [];
-}
-  const hasIssues = mergedBugs.length > 0 || mergedFixes.length > 0 || mergedSuggestions.length > 0;
-  const finalScore = adjustScore({
-    bugs: mergedBugs,
-    runtime_risks: runtimeBugs,
-    code_issues: logicBugs
-  });
+  const hasIssues = runtimeRisks.length + codeIssues.length + fixes.length + suggestions.length > 0;
+  const finalScore = Math.max(0, Math.min(10, Number(summary.final_score) || 0));
   const palette = getScorePalette(finalScore);
   const scoreLabel = getScoreInterpretation(finalScore);
+  const failureReason = suggestions[0]?.description || "Check the input and retry.";
 
   function handleCopyFix(item, idx) {
-    const text = getFixCopyText(item);
+    const text = item?.code || item?.description;
     if (!text) {
       return;
     }
@@ -504,29 +313,35 @@ if (mergedFixes.length === 0) {
             showResults ? "opacity-100" : "opacity-0"
           }`}
         >
+          {pullRequest ? <PullRequestSummary pullRequest={pullRequest} commentCount={reviewComments.length} /> : null}
           <p className="text-[11px] uppercase tracking-wide text-app-muted">Review Findings</p>
-          {!hasIssues ? (
+          {isFailureState ? (
+            <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-200">
+              Review failed: {failureReason}
+            </div>
+          ) : !hasIssues ? (
             <CleanState />
           ) : (
             <div className="space-y-2 border-t border-app-border pt-4">
-              <CollapsibleSection title="Runtime Risks" count={runtimeBugs.length}>
-                <ListItems items={runtimeBugs} empty="No runtime risks reported." type="bug" />
+              <CollapsibleSection title="Runtime Risks" count={runtimeRisks.length}>
+                <ListItems items={runtimeRisks} empty="No runtime risks reported." type="bug" />
               </CollapsibleSection>
-              <CollapsibleSection title="Code Issues" count={logicBugs.length}>
-                <ListItems items={logicBugs} empty="No additional code issues reported." type="bug" />
+              <CollapsibleSection title="Code Issues" count={codeIssues.length}>
+                <ListItems items={codeIssues} empty="No additional code issues reported." type="bug" />
               </CollapsibleSection>
-              <CollapsibleSection title="Fixes" count={mergedFixes.length}>
+              <CollapsibleSection title="Fixes" count={fixes.length}>
                 <ListItems
-                  items={mergedFixes}
+                  items={fixes}
                   empty="No fixes generated."
                   type="fix"
+                  canApplyFix={!pullRequest}
                   onApplyFix={onApplyFix}
                   onCopyFix={handleCopyFix}
                   copiedKey={copiedKey}
                 />
               </CollapsibleSection>
-              <CollapsibleSection title="Suggestions" count={mergedSuggestions.length}>
-                <ListItems items={mergedSuggestions} empty="No suggestions generated." type="suggestion" />
+              <CollapsibleSection title="Suggestions" count={suggestions.length}>
+                <ListItems items={suggestions} empty="No suggestions generated." type="suggestion" />
               </CollapsibleSection>
             </div>
           )}

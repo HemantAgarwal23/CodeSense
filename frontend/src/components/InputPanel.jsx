@@ -1,8 +1,14 @@
 import { useRef, useState } from "react";
 
+const UPLOAD_EXTENSIONS = [".py", ".js", ".ts", ".tsx", ".cpp", ".java"];
+const textInputClass =
+  "h-10 w-full rounded-md border border-app-border bg-[#101827] px-3 text-sm text-app-text outline-none placeholder:text-app-muted hover:border-slate-500 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/25";
+
 export default function InputPanel({
   code,
   repoUrl,
+  prUrl,
+  postComments,
   maxFiles,
   uploadedFileName,
   canSubmit,
@@ -10,9 +16,10 @@ export default function InputPanel({
   canUndo,
   fixStatus,
   codeUpdated,
-  modifiedRange,
   onCodeChange,
   onRepoUrlChange,
+  onPrUrlChange,
+  onPostCommentsChange,
   onMaxFilesChange,
   onSubmit,
   onUndo,
@@ -54,9 +61,8 @@ export default function InputPanel({
       return;
     }
 
-    const allowedExtensions = [".py", ".js", ".cpp", ".java"];
     const lowerName = file.name.toLowerCase();
-    const hasAllowedExtension = allowedExtensions.some((ext) => lowerName.endsWith(ext));
+    const hasAllowedExtension = UPLOAD_EXTENSIONS.some((ext) => lowerName.endsWith(ext));
     if (!hasAllowedExtension) {
       event.target.value = "";
       return;
@@ -82,7 +88,7 @@ export default function InputPanel({
           <input
             ref={fileInputRef}
             type="file"
-            accept=".py,.js,.cpp,.java"
+            accept={UPLOAD_EXTENSIONS.join(",")}
             className="hidden"
             onChange={handleFileChange}
           />
@@ -113,8 +119,29 @@ export default function InputPanel({
           value={repoUrl}
           onChange={(e) => onRepoUrlChange(e.target.value)}
           placeholder="https://github.com/owner/repo"
-          className="h-10 w-full rounded-md border border-app-border bg-[#101827] px-3 text-sm text-app-text outline-none placeholder:text-app-muted hover:border-slate-500 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/25"
+          className={textInputClass}
         />
+      </div>
+
+      <div className="rounded-lg border border-app-border bg-app-panelAlt p-4">
+        <label className="mb-3 block text-[11px] uppercase tracking-wide text-app-muted">Pull Request</label>
+        <input
+          type="text"
+          value={prUrl}
+          onChange={(e) => onPrUrlChange(e.target.value)}
+          placeholder="https://github.com/owner/repo/pull/123"
+          className={textInputClass}
+        />
+        <label className="mt-3 flex items-center gap-2 text-xs text-app-muted">
+          <input
+            type="checkbox"
+            checked={postComments}
+            onChange={(e) => onPostCommentsChange(e.target.checked)}
+            className="h-3.5 w-3.5 accent-cyan-500"
+          />
+          Post findings as review comments on GitHub (server needs GITHUB_TOKEN)
+        </label>
+        <p className="mt-2 text-xs text-app-muted">A pull request URL takes priority over the repository and code inputs.</p>
       </div>
 
       <div className="rounded-lg border border-app-border bg-app-panelAlt p-4">
@@ -123,7 +150,7 @@ export default function InputPanel({
           value={code}
           onChange={(e) => onCodeChange(e.target.value)}
           placeholder="Paste source code here..."
-          className={`h-[360px] w-full resize-none rounded-md border px-4 py-3 font-mono text-[13px] leading-6 text-app-text outline-none placeholder:text-app-muted hover:border-slate-500 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/30 ${
+          className={`h-[300px] w-full resize-none rounded-md border px-4 py-3 font-mono text-[13px] leading-6 text-app-text outline-none placeholder:text-app-muted hover:border-slate-500 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/30 ${
             codeUpdated ? "border-cyan-500 bg-[#162743]" : "border-app-border bg-[#0f1b2d]"
           }`}
         />
@@ -132,7 +159,6 @@ export default function InputPanel({
       {fixStatus ? (
         <div className="rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
           <div className="font-medium">{fixStatus}</div>
-          {modifiedRange ? <div className="mt-1 text-emerald-300/85">Modified lines: {modifiedRange}</div> : null}
         </div>
       ) : null}
       {copyStatus ? <div className="text-xs text-cyan-300">{copyStatus}</div> : null}
@@ -145,7 +171,7 @@ export default function InputPanel({
             min="1"
             value={maxFiles}
             onChange={(e) => onMaxFilesChange(e.target.value)}
-            className="h-10 w-full rounded-md border border-app-border bg-[#101827] px-3 text-sm text-app-text outline-none placeholder:text-app-muted hover:border-slate-500 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/25"
+            className={textInputClass}
           />
         </div>
         <div className="flex flex-wrap items-center gap-2">
